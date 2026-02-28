@@ -15,7 +15,7 @@ from transformers import (
     BitsAndBytesConfig,
 )
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from trl import SFTTrainer, SFTConfig, DataCollatorForCompletionOnlyLM
+from trl import SFTTrainer, SFTConfig
 
 
 # =============================================================================
@@ -220,14 +220,14 @@ def main():
             MODEL_NAME,
             quantization_config=bnb_config,
             device_map="auto",
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
         )
         model = prepare_model_for_kbit_training(model)
     else:
         model = AutoModelForCausalLM.from_pretrained(
             MODEL_NAME,
             device_map="auto",
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
         )
 
     model.config.use_cache = False
@@ -244,14 +244,6 @@ def main():
     )
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
-
-    # Data collator: supervise ONLY completion after assistant header
-    # For Llama-3.* chat template, the assistant section begins with:
-    response_template = "<|start_header_id|>assistant<|end_header_id|>\n\n"
-    data_collator = DataCollatorForCompletionOnlyLM(
-        response_template=response_template,
-        tokenizer=tokenizer,
-    )
 
     # Training config
     print("\n[5/6] Starting training...")
@@ -277,6 +269,7 @@ def main():
         dataset_text_field="text",
         report_to="none",
         seed=SEED,
+        completion_only_loss=True,  # masks prompt tokens to -100, loss only on assistant response
     )
 
     trainer = SFTTrainer(
@@ -285,7 +278,6 @@ def main():
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
         processing_class=tokenizer,
-        data_collator=data_collator,  # <-- key: masks prompt tokens to -100
     )
 
     trainer.train()

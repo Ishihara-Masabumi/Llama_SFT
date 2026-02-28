@@ -1,5 +1,6 @@
 """
-Evaluate fine-tuned Llama-3.2-3B-Instruct (LoRA) on JCommonsenseQA
+Evaluate fine-tuned Llama-3.2-3B-Instruct (completion-only LoRA) on JCommonsenseQA
+Uses the same prompt format as finetuning.py: [ANSWER] X
 """
 
 import re
@@ -12,48 +13,44 @@ from peft import PeftModel
 # Configuration
 # =============================================================================
 BASE_MODEL = "meta-llama/Llama-3.2-3B-Instruct"
-ADAPTER_PATH = "/home/ubuntu/Llama_SFT/output/final"
+ADAPTER_PATH = "/home/ubuntu/Llama_SFT/output_mcq_answer_only/final"
 DATASET_NAME = "leemeng/jcommonsenseqa"
 
 CHOICE_LABELS = ["A", "B", "C", "D", "E"]
+ANSWER_RE = re.compile(r"\[ANSWER\]\s*([ABCDE])", re.IGNORECASE)
 
 
 def build_prompt(example):
-    """Build the same prompt format used during fine-tuning."""
+    """Build the same prompt format used during finetuning.py."""
     question = example["question"]
     choices = [example[f"choice{i}"] for i in range(5)]
     choices_text = "\n".join(
         f"{CHOICE_LABELS[i]}. {choices[i]}" for i in range(5)
     )
     user_message = (
-        f"以下の質問に対して、最も適切な選択肢を1つ選んでください。\n\n"
-        f"質問: {question}\n\n"
-        f"選択肢:\n{choices_text}"
+        "以下の質問に対して、最も適切な選択肢を1つ選んでください。\n"
+        "最後に必ず「[ANSWER] X」の形式で答えてください。\n\n"
+        f"[QUESTION]\n{question}\n\n"
+        f"[CHOICES]\n{choices_text}\n"
     )
     return user_message
 
 
 def extract_answer(text):
     """Extract answer label from model output."""
-    text = text.strip()
-    # Match patterns like "A.", "A. 世界", "A"
-    m = re.match(r"^([A-E])\.", text)
+    m = ANSWER_RE.search(text)
     if m:
         return m.group(1).upper()
-    # Single letter
-    m = re.match(r"^([A-E])$", text.strip())
-    if m:
-        return m.group(1).upper()
-    # Anywhere in text
-    m = re.search(r"([A-E])\.", text)
-    if m:
-        return m.group(1).upper()
+    # Fallback: single letter
+    m2 = re.search(r"\b([ABCDE])\b", text.strip().upper())
+    if m2:
+        return m2.group(1)
     return None
 
 
 def main():
     print("=" * 60)
-    print("Evaluating fine-tuned model on JCommonsenseQA")
+    print("Evaluating completion-only LoRA model on JCommonsenseQA")
     print("=" * 60)
 
     # Load tokenizer
@@ -103,7 +100,7 @@ def main():
         with torch.no_grad():
             out = model.generate(
                 **inputs,
-                max_new_tokens=20,
+                max_new_tokens=8,
                 do_sample=False,
             )
 
@@ -127,7 +124,7 @@ def main():
 
     accuracy = correct / total
     print(f"\n{'=' * 60}")
-    print(f"Results:")
+    print(f"Results (completion-only LoRA):")
     print(f"  Total: {total}")
     print(f"  Correct: {correct}")
     print(f"  Accuracy: {accuracy:.4f} ({accuracy*100:.2f}%)")
